@@ -1,0 +1,82 @@
+Cvserver is an extension of the multiServer code from FRC's WPILib
+Suite. In addition to support for streaming from multiple cameras, it
+provides functionality for tracking 2019 vision targets as well as
+alignment lines.
+
+Alignment line tracking
+
+The alignment line tracking is enabled by adding an extra property in
+the camera's custom properties JSON. If property with a name
+"track_line" is present, and its value is "true", the camera is used
+to track alignment lines. An example of custom properties that enable
+the alignment line tracking:
+
+[
+	{"name":"track_line","value":true},
+	{"name":"line_coeff","value":5.34}
+]
+
+The code expects a single line that is brighter than the rest of the
+image. It calculates the angle of the line relative to a vertical
+line. Possible angle values are from -90 degrees to 90 degrees.
+Positive angle values mean that the alignment line is on the right
+side of a vertical line. The angle is negative when the alignment
+line is on the left side of a vertical line.
+
+The code also calculates the displacement of the center of the line.
+The value by default is between -0.5 and 0.5, where -0.5 means that
+the line is at the left edge of the image, when it is 0.5 the line is
+at the right edge.
+
+Cvserver provides support for an optional property, "line_coeff"
+which, when specified, is used to multiply the displacement value.
+Line_coeff can be used to convert the displacement value to real
+distance.
+
+The code publishes two values in the Network Table, subtable "Target":
+
+	Angle: the angle of the alignment line
+	X: the displacement
+
+Vision target tracking
+
+The vision target tracking is enabled by adding an extra property in
+the camera's custom properties JSON. If property with a name
+"track_target" is present, and its value is "false", the camera is
+used to track vision targets. An example of custom properties that
+enable the vision target tracking:
+
+[
+	{"name":"track_target","value":true},
+	{"name":"target_rgb_low","value":[0,64,0]},
+	{"name":"target_rgb_high","value":[255,255,255]},
+	{"name":"auto_exposure","value":1},
+	{"name":"exposure_time_absolute","value":1}
+]
+
+The tracking works best when the exposure time is low and the camera
+is encircled by LEDs that emit light of a specific color. Optional
+(but recommended) properties ("target_rgb_low" and "target_rgb_high")
+define the range of RGB colors that the LEDs emit. The example above
+is for green LEDs. 
+
+The code can track multiple targets. For each of them it calculates
+(x,y,z) distances to the plane of the target as well as (yaw, pitch,
+roll) angles to the floor point at the center of the target. The
+distances are in centimeters, the angles are in degrees.
+
+For each target, the code creates subtable in the "Target" subtable of
+the Network Tables and publishes the following values:
+
+	X	distance on the X coordinate
+	Y	distance on the Y coordinate
+	Z	distance on the Z coordinate
+	Yaw	rotatation parallel to the floor
+	Pitch	rotation on a plane perpendicular both to the floor
+		and the target plane
+	Roll	rotation on a plane parallel to the target plane
+
+The name of the subtable is the number of the target, from 0 to N.
+
+If line or vision-target tracking is enabled, cvserver also publishes
+an additional stream that marks the line or the vision targets.
