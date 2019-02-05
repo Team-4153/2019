@@ -1,5 +1,5 @@
 [My Computer]
-My Computer="172.24.114.26"
+My Computer="172.24.114.21"
 
 [Target-roboRIO-4153-FRC.local]
 Target-roboRIO-4153-FRC.local="localhost"
