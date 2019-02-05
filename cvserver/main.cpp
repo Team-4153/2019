@@ -24,6 +24,7 @@
 #include <wpi/json.h>
 #include <wpi/raw_istream.h>
 #include <wpi/raw_ostream.h>
+#include <cscore/cscore_oo.h>
 
 #include "cameraserver/CameraServer.h"
 
@@ -70,8 +71,8 @@ struct CameraConfig {
 
 	// vision target tracking
 	bool		targetTrack;
-	Scalar		targetColorLow;
-	Scalar		targetColorHigh;
+	int		targetHLow, targetSLow, targetVLow;
+	int		targetHHigh, targetSHigh, targetVHigh;
 
 	// line tracking
 	bool		lineTrack;
@@ -139,8 +140,8 @@ const int height = 480; // 922 // 720 // 480
 // stripe data
 const double stripe_ratio = 2.78;
 const double stripe_err = 2.0;
-const double angle_low = -18.0;
-const double angle_high = 18.0;
+const double angle_low = -20.0;
+const double angle_high = 20.0;
 
 // Model of the target. All numbers are in centimeters
 vector<Point3f> Target::model = {
@@ -210,8 +211,8 @@ double distance(Point2f& p1, Point2f& p2) {
 int cmppoint(const void *p1, const void *p2) {
 	int ret;
 
-	Point2f *pt1 = (Point2f *) p1;
-	Point2f *pt2 = (Point2f *) p2;
+	Point *pt1 = (Point *) p1;
+	Point *pt2 = (Point *) p2;
 
 	ret = pt1->y - pt2->y;
 	if (ret == 0)
@@ -231,16 +232,22 @@ bool checkStripe(Stripe *s) {
 	double r = s->length / s->width;
 
 	// check if the length and the width are within expected ratio range
-	if (isnan(r) || r < (stripe_ratio - stripe_err) || r > (stripe_ratio + stripe_err))
+	if (isnan(r) || r < (stripe_ratio - stripe_err) || r > (stripe_ratio + stripe_err)) {
+//		printf("\tbad stripe ratio: %f\n", r);
 		return false;
+	}
 
 	// check if the angle of the stripe is within the expected range
-	if (s->angle < angle_low || s->angle > angle_high)
+	if (s->angle < angle_low || s->angle > angle_high) {
+//		printf("\tbad angle: %f should be between (%f, %f)\n", s->angle, angle_low, angle_high);
 		return false;
+	}
 
 	// check if the stripe is big enough
-	if (s->area() < 50)
+	if (s->area() < 50) {
+//		printf("\tbad area size: %f\n", s->area());
 		return false;
+	}
 
 	return true;
 }
@@ -272,6 +279,65 @@ Stripe *processContour(OutputArrayOfArrays contour) {
 
 	return s;
 }
+
+/* It looks that this is worse than the minAreaRect, at least at the moment...
+
+Stripe *processContour(OutputArrayOfArrays contour) {
+	Stripe *s = NULL;
+	double p;
+	Point2f box[4];
+	vector<Point> approx;
+
+	p = arcLength(contour, true);
+
+	// we don't care about contours that are too small
+	if (p < 40)
+		return NULL;
+
+	approxPolyDP(contour, approx, p * 0.04, true);
+	if (approx.size() != 4)
+		return NULL;
+
+	s = new(Stripe);
+	for(int i = 0; i < approx.size(); i++) {
+		Point pt = approx[i];
+
+		box[i].x = pt.x;
+		box[i].y = pt.y;
+	}
+	box[4] = box[0];
+
+	qsort(box, 4, sizeof(box[0]), cmppoint);
+	if (box[0].x < box[1].x) {
+		s->box[0] = box[0];
+		s->box[1] = box[1];
+	} else {
+		s->box[0] = box[1];
+		s->box[1] = box[0];
+	}
+
+	if (box[2].x < box[3].x) {
+		s->box[2] = box[2];
+		s->box[3] = box[3];
+	} else {
+		s->box[2] = box[3];
+		s->box[3] = box[2];
+	}
+
+	// calculate the length and the width of the stripe
+	s->width = (distance(s->box[0], s->box[1]) + distance(s->box[2], s->box[3])) / 2.0;
+	s->length = (distance(s->box[1], s->box[2]) + distance(s->box[3], s->box[0])) / 2.0;
+
+	// calculate the angles of the two sides of the rectangle
+	double a1 = (atan2((s->box[2].x - s->box[0].x), (s->box[2].y - s->box[0].y))/M_PI) * 180.;
+	double a2 = (atan2((s->box[3].x - s->box[1].x), (s->box[3].y - s->box[1].y))/M_PI) * 180.;
+
+	// and the average of the angles
+	s->angle = (a1 + a2) / 2.0;
+
+	return s;
+}
+*/
 
 int stripecmp(const void *p1, const void *p2) {
 	int ret;
@@ -333,10 +399,10 @@ void processTargets(Mat &src, Mat &dst, const CameraConfig& c) {
 	int stripenum;
 	Stripe *stripes[64];
 
-//	cvtColor(src, hsv, CV_BGR2HSV);
+	cvtColor(src, hsv, CV_BGR2HSV);
 
 	// Get only pixels that have the colors we expect the stripes to be
-	inRange(src, c.targetColorLow, c.targetColorHigh, mask);
+	inRange(src, Scalar(c.targetHLow, c.targetSLow, c.targetVLow), Scalar(c.targetHHigh, c.targetSHigh, c.targetVHigh), mask);
 
 	// Find contours
 	findContours(mask, contours, hierarchy, RETR_TREE, CHAIN_APPROX_TC89_KCOS/*CHAIN_APPROX_SIMPLE*/);
@@ -345,6 +411,10 @@ void processTargets(Mat &src, Mat &dst, const CameraConfig& c) {
 	stripenum = 0;
 	for(size_t i = 0; i < contours.size(); i++) {
 		Stripe *st = processContour(contours[i]);
+		if (st == NULL) {
+//			printf("\tbad\n");
+			continue;
+		}
 
 		// check if the stripe follows some common sense restrictions
 		if (!checkStripe(st)) {
@@ -352,7 +422,7 @@ void processTargets(Mat &src, Mat &dst, const CameraConfig& c) {
 			continue;
 		}
 
-//		s.draw(dst, true);
+		st->draw(dst, true);
 		stripes[stripenum++] = st;
 		if (stripenum >= 64) {
 			wpi::outs() << "*** stripes > 64\n";
@@ -452,6 +522,9 @@ void processLine(Mat &src, Mat &dst, const CameraConfig& c) {
 	best = NULL;
 	for(size_t i = 0; i < contours.size(); i++) {
 		Stripe *st = processContour(contours[i]);
+		if (st == NULL)
+			continue;
+
 		if (best == NULL || best->area() < st->area()) {
 			delete best;
 			best = st;
@@ -487,12 +560,14 @@ bool ReadCameraConfig(const wpi::json& config) {
 	c.width = 640;
 	c.height = 480;
 	c.targetTrack = false;
-	c.targetColorLow = Scalar(0, 245, 0);
-	c.targetColorHigh = Scalar(255, 255, 255);
+	c.targetHLow = 0;
+	c.targetSLow = 0;
+	c.targetVLow = 0;
+	c.targetHHigh = 180;
+	c.targetSHigh = 255;
+	c.targetVHigh = 255;
 	c.lineTrack = false;
 	c.lineCoeff = 1.0;
-//	c.targetColorLow = Scalar(60-10, 0, 30);
-//	c.targetColorHigh = Scalar(60+10, 255, 255);
 
 	// name
 	try {
@@ -525,25 +600,20 @@ bool ReadCameraConfig(const wpi::json& config) {
 			name = prop.at("name").get<std::string>();
 			if (name == "track_target") {
 				c.targetTrack  = prop.at("value").get<bool>();
-			} else if (name == "target_rgb_low" || name == "target_rgb_high") {
-				int clr[3];
-
-				int i = 0;
-				cout << "property " << name << "\n";
-				for(auto && p : prop.at("value")) {
-					clr[i] = p.get<int>();
-					i++;
-					if (i > 3)
-						break;
-				}
-
-				Scalar sclr(clr[0], clr[1], clr[2]);
-				if (name == "target_rgb_low")
-					c.targetColorLow = sclr;
-				else
-					c.targetColorHigh = sclr;
 			} else if (name == "track_line") {
 				c.lineTrack = prop.at("value").get<bool>();
+			} else if (name == "h_low") {
+				c.targetHLow = prop.at("value").get<int>();
+			} else if (name == "s_low") {
+				c.targetSLow = prop.at("value").get<int>();
+			} else if (name == "v_low") {
+				c.targetVLow = prop.at("value").get<int>();
+			} else if (name == "h_high") {
+				c.targetHHigh = prop.at("value").get<int>();
+			} else if (name == "s_high") {
+				c.targetSHigh = prop.at("value").get<int>();
+			} else if (name == "v_high") {
+				c.targetVHigh = prop.at("value").get<int>();
 			} else if (name == "line_coeff") {
 				c.lineCoeff = prop.at("value").get<double>();
 			}
@@ -619,18 +689,72 @@ bool ReadConfig() {
 	return true;
 }
 
-void CameraThread(const CameraConfig& config) {
+void CameraThread(CameraConfig* config) {
+	CS_Status status = 0;
+	char buf[20];
 	cv::Mat mat;
 
-	wpi::outs() << "Starting camera '" << config.name << "' on " << config.path << '\n';
-	auto camera = frc::CameraServer::GetInstance()->StartAutomaticCapture(config.name, config.path);
-	camera.SetConfigJson(config.config);
+	wpi::outs() << "Starting camera '" << config->name << "' on " << config->path << '\n';
+	auto camera = frc::CameraServer::GetInstance()->StartAutomaticCapture(config->name, config->path);
+	camera.SetConfigJson(config->config);
 
-	if (!config.targetTrack && !config.lineTrack)
+	if (!config->targetTrack && !config->lineTrack)
 		return;
 
 	cs::CvSink cvSink = frc::CameraServer::GetInstance()->GetVideo();
-	cs::CvSource outputStream = frc::CameraServer::GetInstance()->PutVideo("Target", config.width, config.height);
+	cs::CvSource outputStream = frc::CameraServer::GetInstance()->PutVideo("Target", config->width, config->height);
+	outputStream.CreateProperty("track_target", cs::VideoProperty::Kind::kBoolean, 0, 1, 1, 0, config->targetTrack);
+	outputStream.CreateProperty("track_line", cs::VideoProperty::Kind::kBoolean, 0, 1, 1, 0, config->lineTrack);
+	outputStream.CreateProperty("h_low", cs::VideoProperty::Kind::kInteger, 0, 180, 1, 25, config->targetHLow);
+	outputStream.CreateProperty("s_low", cs::VideoProperty::Kind::kInteger, 0, 255, 1, 128,config->targetSLow);
+	outputStream.CreateProperty("v_low", cs::VideoProperty::Kind::kInteger, 0, 255, 1, 128, config->targetVLow);
+
+	outputStream.CreateProperty("h_high", cs::VideoProperty::Kind::kInteger, 0, 180, 1, 35, config->targetHHigh);
+	outputStream.CreateProperty("s_high", cs::VideoProperty::Kind::kInteger, 0, 255, 1, 128,config->targetSHigh);
+	outputStream.CreateProperty("v_high", cs::VideoProperty::Kind::kInteger, 0, 255, 1, 128, config->targetVHigh);
+
+//	int lcoeff = outputStream.CreateProperty("line_coeff", cs::VideoProperty::Kind::kString, 0, 255, 1, 128, 0);
+	snprintf(buf, sizeof(buf), "%f", config->lineCoeff);
+	outputStream.CreateStringProperty("line_coeff", buf);
+	
+	// Adding them here so it is easier to copy/paste the settings
+	outputStream.CreateProperty("exposure_auto", cs::VideoProperty::Kind::kInteger, 0, 1, 1, 1, 1);
+	outputStream.CreateProperty("exposure_absolute", cs::VideoProperty::Kind::kInteger, 0, 1, 1, 0, 0);
+
+	cs::AddListener(
+		[&](const cs::RawEvent& event) {
+			cout << "Property updated '" << event.name << "' value: " << event.value << "\n";
+			if (event.name == "h_low") {
+				config->targetHLow = event.value;
+			} else if (event.name == "s_low") {
+				config->targetSLow = event.value;
+			} else if (event.name == "v_low") {
+				config->targetVLow = event.value;
+			} else if (event.name == "h_high") {
+				config->targetHHigh = event.value;
+			} else if (event.name == "s_high") {
+				config->targetSHigh = event.value;
+			} else if (event.name == "v_high") {
+				config->targetVHigh = event.value;
+			} else if (event.name == "track_target") {
+				config->targetTrack = event.value;
+			} else if (event.name == "track_line") {
+				config->lineTrack = event.value;
+			} else if (event.name == "line_coeff") {
+				char *s;
+				double v;
+
+				v = strtod(event.valueStr.c_str(), &s);
+				if (*s == '\0') {
+					config->lineCoeff = v;
+				}
+			} else if (event.name == "exposure_auto") {
+				// ignore for now
+			} else if (event.name == "exposure_absolute") {
+				// ignore for now
+				// camera.SetExposureManual(event.value);
+			}
+		}, cs::RawEvent::kSourcePropertyValueUpdated, true, &status);
 
 	while (true) {
 		// Tell the CvSink to grab a frame from the camera and put it
@@ -642,11 +766,11 @@ void CameraThread(const CameraConfig& config) {
 			continue;
 		}
 
-		if (config.targetTrack)
-			processTargets(mat, mat, config);
+		if (config->targetTrack)
+			processTargets(mat, mat, *config);
 
-		if (config.lineTrack)
-			processLine(mat, mat, config);
+		if (config->lineTrack)
+			processLine(mat, mat, *config);
 
 		// Give the output stream a new image to display
 		outputStream.PutFrame(mat);
@@ -674,7 +798,9 @@ int main(int argc, char* argv[]) {
 	table = ntinst.GetTable("Target");
 
 	// start cameras
-	for (auto&& camera : cameras) {
+	for(int i = 0; i < cameras.size(); i++) {
+		auto camera = &cameras[i];
+//	for (auto&& camera : cameras) {
 		thread cameraThread(CameraThread, camera);
 		cameraThread.detach();
 	}

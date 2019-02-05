@@ -48,17 +48,23 @@ enable the vision target tracking:
 
 [
 	{"name":"track_target","value":true},
-	{"name":"target_rgb_low","value":[0,64,0]},
-	{"name":"target_rgb_high","value":[255,255,255]},
+	{"name":"h_low","value":0},
+	{"name":"s_low","value":0},
+	{"name":"v_low","value":0},
+	{"name":"h_high","value":180},
+	{"name":"s_high","value":255},
+	{"name":"v_high","value":255}
 	{"name":"auto_exposure","value":1},
 	{"name":"exposure_time_absolute","value":1}
 ]
 
 The tracking works best when the exposure time is low and the camera
-is encircled by LEDs that emit light of a specific color. Optional
-(but recommended) properties ("target_rgb_low" and "target_rgb_high")
-define the range of RGB colors that the LEDs emit. The example above
-is for green LEDs. 
+is encircled by LEDs that emit light of a specific color. Properties
+{hsv}_low define the lowest hue/saturation/value values for the
+target. Respectively, {hsv}_high values define the maximum values for
+the target color. The example above defines the full HSV range (Note:
+OpenCV divides the Hue range [0:360] by two so it can fit in an 8-bit
+value).
 
 The code can track multiple targets. For each of them it calculates
 (x,y,z) distances to the plane of the target as well as (yaw, pitch,
@@ -80,3 +86,114 @@ The name of the subtable is the number of the target, from 0 to N.
 
 If line or vision-target tracking is enabled, cvserver also publishes
 an additional stream that marks the line or the vision targets.
+
+Modifying the values
+
+The additional stream published by cvserver provides convenient way to
+change the custom properties. Once you are happy with the settings,
+you can use the "Source Config JSON" link to get the complete
+configuration, and you can copy the "properties" value to the Custom
+Properties JSON for the camera. Make sure you only copy the value for
+the propertties. If the "Source Config JSON" looks like:
+
+	{
+	    "fps": 30,
+	    "height": 480,
+	    "pixel format": "mjpeg",
+	    "properties": [
+	        {
+	            "name": "track_target",
+	            "value": true
+	        },
+	        {
+	            "name": "track_line",
+	            "value": false
+	        },
+	        {
+	            "name": "h_low",
+	            "value": 0
+	        },
+	        {
+	            "name": "s_low",
+	            "value": 0
+	        },
+	        {
+	            "name": "v_low",
+	            "value": 0
+	        },
+	        {
+	            "name": "h_high",
+	            "value": 180
+	        },
+	        {
+	            "name": "s_high",
+	            "value": 255
+	        },
+	        {
+	            "name": "v_high",
+	            "value": 255
+	        },
+	        {
+	            "name": "line_coeff",
+	            "value": "1.000000"
+	        },
+	        {
+	            "name": "exposure_auto",
+	            "value": 1
+	        },
+	        {
+	            "name": "exposure_absolute",
+	            "value": 0
+	        }
+	    ],
+	    "width": 640
+	}
+	
+You only need to copy:
+	
+	[
+	        {
+	            "name": "track_target",
+	            "value": true
+	        },
+	        {
+	            "name": "track_line",
+	            "value": false
+	        },
+	        {
+	            "name": "h_low",
+	            "value": 0
+	        },
+	        {
+	            "name": "s_low",
+	            "value": 0
+	        },
+	        {
+	            "name": "v_low",
+	            "value": 0
+	        },
+	        {
+	            "name": "h_high",
+	            "value": 180
+	        },
+	        {
+	            "name": "s_high",
+	            "value": 255
+	        },
+	        {
+	            "name": "v_high",
+	            "value": 255
+	        },
+	        {
+	            "name": "line_coeff",
+	            "value": "1.000000"
+	        },
+	        {
+	            "name": "exposure_auto",
+	            "value": 1
+	        },
+	        {
+	            "name": "exposure_absolute",
+	            "value": 0
+	        }
+	]
