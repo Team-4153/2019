@@ -93,13 +93,14 @@ struct Stripe {
 	double	angle;
 
 //	bool left() { return angle < 0.0; }
-	void draw(Mat &dst, bool left) {
-		Scalar color = left?Scalar(0, 0, 255):Scalar(255, 0, 0);
+	void draw(Mat &dst, int idx) {
+		Scalar color[] = { Scalar(0, 0, 255), Scalar(255, 0, 0), Scalar(255, 255, 255) };
+//		Scalar color = left?Scalar(0, 0, 255):Scalar(255, 0, 0);
 
-		line(dst, box[0], box[1], color);
-		line(dst, box[1], box[3], color);
-		line(dst, box[3], box[2], color);
-		line(dst, box[2], box[0], color);
+		line(dst, box[0], box[1], color[idx]);
+		line(dst, box[1], box[3], color[idx]);
+		line(dst, box[3], box[2], color[idx]);
+		line(dst, box[2], box[0], color[idx]);
 	}
 
 	double area() {
@@ -231,6 +232,12 @@ double dist2(Point2f& p1, Point2f& p2) {
 bool checkStripe(Stripe *s) {
 	double r = s->length / s->width;
 
+	// check if the stripe is big enough
+	if (s->area() < 36) {
+//		printf("\tbad area size: %f\n", s->area());
+		return false;
+	}
+
 	// check if the length and the width are within expected ratio range
 	if (isnan(r) || r < (stripe_ratio - stripe_err) || r > (stripe_ratio + stripe_err)) {
 //		printf("\tbad stripe ratio: %f\n", r);
@@ -240,12 +247,6 @@ bool checkStripe(Stripe *s) {
 	// check if the angle of the stripe is within the expected range
 	if (s->angle < angle_low || s->angle > angle_high) {
 //		printf("\tbad angle: %f should be between (%f, %f)\n", s->angle, angle_low, angle_high);
-		return false;
-	}
-
-	// check if the stripe is big enough
-	if (s->area() < 50) {
-//		printf("\tbad area size: %f\n", s->area());
 		return false;
 	}
 
@@ -402,14 +403,17 @@ void processTargets(Mat &src, Mat &dst, const CameraConfig& c) {
 	cvtColor(src, hsv, CV_BGR2HSV);
 
 	// Get only pixels that have the colors we expect the stripes to be
-	inRange(src, Scalar(c.targetHLow, c.targetSLow, c.targetVLow), Scalar(c.targetHHigh, c.targetSHigh, c.targetVHigh), mask);
+	inRange(hsv, Scalar(c.targetHLow, c.targetSLow, c.targetVLow), Scalar(c.targetHHigh, c.targetSHigh, c.targetVHigh), mask);
 
 	// Find contours
-	findContours(mask, contours, hierarchy, RETR_TREE, CHAIN_APPROX_TC89_KCOS/*CHAIN_APPROX_SIMPLE*/);
+	findContours(mask, contours, hierarchy, RETR_TREE, /*CHAIN_APPROX_TC89_KCOS*/CHAIN_APPROX_SIMPLE);
 
 	// Identify stripes
 	stripenum = 0;
 	for(size_t i = 0; i < contours.size(); i++) {
+		if (hierarchy[i][3] >= 0)
+			continue;
+
 		Stripe *st = processContour(contours[i]);
 		if (st == NULL) {
 //			printf("\tbad\n");
@@ -418,11 +422,11 @@ void processTargets(Mat &src, Mat &dst, const CameraConfig& c) {
 
 		// check if the stripe follows some common sense restrictions
 		if (!checkStripe(st)) {
+//			st->draw(dst, 2);
 			delete(st);
 			continue;
 		}
 
-		st->draw(dst, true);
 		stripes[stripenum++] = st;
 		if (stripenum >= 64) {
 			wpi::outs() << "*** stripes > 64\n";
@@ -472,8 +476,8 @@ void processTargets(Mat &src, Mat &dst, const CameraConfig& c) {
 		Target *t;
 
 		t = targets[i];
-		t->left->draw(dst, true);
-		t->right->draw(dst, false);
+		t->left->draw(dst, 0);
+		t->right->draw(dst, 1);
 
 		snprintf(buf, sizeof(buf), "%02d", i);
 		std::shared_ptr<nt::NetworkTable> ttbl = table->GetSubTable(buf);
@@ -487,7 +491,6 @@ void processTargets(Mat &src, Mat &dst, const CameraConfig& c) {
 		printf("Target %d\n", i);
 		printf("\tyaw %f pitch %f roll %f\n", t->yaw, t->pitch, t->roll);
 		printf("\tx %f y %f z %f\n", t->tpos[0], t->tpos[1], t->tpos[2]);
-		printf("\t%f %f\n", t->left->angle, t->right->angle);
 	}
 
 	// (hopefully) clear all stale sub-tables
@@ -546,6 +549,7 @@ void processLine(Mat &src, Mat &dst, const CameraConfig& c) {
 	double center = c.lineCoeff * (((best->box[0].x + best->box[1].x + best->box[2].x + best->box[3].x) / 4) / c.width - 0.5);
 	table->PutNumber("X", center);
 
+	printf("angle %f x %f\n", best->angle, center);
 	delete best;
 }
 
@@ -705,11 +709,11 @@ void CameraThread(CameraConfig* config) {
 	cs::CvSource outputStream = frc::CameraServer::GetInstance()->PutVideo("Target", config->width, config->height);
 	outputStream.CreateProperty("track_target", cs::VideoProperty::Kind::kBoolean, 0, 1, 1, 0, config->targetTrack);
 	outputStream.CreateProperty("track_line", cs::VideoProperty::Kind::kBoolean, 0, 1, 1, 0, config->lineTrack);
-	outputStream.CreateProperty("h_low", cs::VideoProperty::Kind::kInteger, 0, 180, 1, 25, config->targetHLow);
+	outputStream.CreateProperty("h_low", cs::VideoProperty::Kind::kInteger, 0, 360, 1, 25, config->targetHLow);
 	outputStream.CreateProperty("s_low", cs::VideoProperty::Kind::kInteger, 0, 255, 1, 128,config->targetSLow);
 	outputStream.CreateProperty("v_low", cs::VideoProperty::Kind::kInteger, 0, 255, 1, 128, config->targetVLow);
 
-	outputStream.CreateProperty("h_high", cs::VideoProperty::Kind::kInteger, 0, 180, 1, 35, config->targetHHigh);
+	outputStream.CreateProperty("h_high", cs::VideoProperty::Kind::kInteger, 0, 360, 1, 35, config->targetHHigh);
 	outputStream.CreateProperty("s_high", cs::VideoProperty::Kind::kInteger, 0, 255, 1, 128,config->targetSHigh);
 	outputStream.CreateProperty("v_high", cs::VideoProperty::Kind::kInteger, 0, 255, 1, 128, config->targetVHigh);
 
@@ -756,10 +760,12 @@ void CameraThread(CameraConfig* config) {
 			}
 		}, cs::RawEvent::kSourcePropertyValueUpdated, true, &status);
 
+	uint64_t prevtime = 0;
 	while (true) {
 		// Tell the CvSink to grab a frame from the camera and put it
 		// in the source mat.  If there is an error notify the output.
-		if (cvSink.GrabFrame(mat) == 0) {
+		uint64_t tstamp = cvSink.GrabFrame(mat);
+		if (tstamp == 0) {
 			// Send the output the error.
 			outputStream.NotifyError(cvSink.GetError());
 			// skip the rest of the current iteration
@@ -772,6 +778,10 @@ void CameraThread(CameraConfig* config) {
 		if (config->lineTrack)
 			processLine(mat, mat, *config);
 
+		if (prevtime != 0)
+			printf("%f fps\n", 1000000.0 / (tstamp - prevtime));
+
+		prevtime = tstamp;
 		// Give the output stream a new image to display
 		outputStream.PutFrame(mat);
 	}
