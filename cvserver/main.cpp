@@ -15,7 +15,7 @@
 #include <opencv2/features2d.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/calib3d.hpp>
-#include <opencv2/xfeatures2d.hpp>
+//#include <opencv2/xfeatures2d.hpp>
 #include <opencv2/imgcodecs/legacy/constants_c.h>
 #include <opencv2/imgproc/types_c.h>
 #include <opencv2/calib3d/calib3d_c.h>
@@ -57,7 +57,7 @@
 
 using namespace cv;
 using namespace std;
-using namespace cv::xfeatures2d;
+//using namespace cv::xfeatures2d;
 
 static const char* configFile = "/boot/frc.json";
 unsigned int team;
@@ -409,7 +409,7 @@ void processTargets(Mat &src, Mat &dst, const CameraConfig& c) {
 	inRange(hsv, Scalar(c.targetHLow, c.targetSLow, c.targetVLow), Scalar(c.targetHHigh, c.targetSHigh, c.targetVHigh), mask);
 
 	// Find contours
-	findContours(mask, contours, hierarchy, RETR_TREE, /*CHAIN_APPROX_TC89_KCOS*/CHAIN_APPROX_SIMPLE);
+	findContours(mask, contours, hierarchy, RETR_TREE, CHAIN_APPROX_TC89_KCOS/*CHAIN_APPROX_SIMPLE*/);
 
 	// Identify stripes
 	stripenum = 0;
@@ -712,7 +712,7 @@ void CameraThread(CameraConfig* config) {
 	cs::CvSource outputStream = frc::CameraServer::GetInstance()->PutVideo("Target", config->width, config->height);
 	outputStream.CreateProperty("track_target", cs::VideoProperty::Kind::kBoolean, 0, 1, 1, 0, config->targetTrack);
 	outputStream.CreateProperty("track_line", cs::VideoProperty::Kind::kBoolean, 0, 1, 1, 0, config->lineTrack);
-	outputStream.CreateProperty("h_low", cs::VideoProperty::Kind::kInteger, 0, 360, 1, 25, config->targetHLow);
+	outputStream.CreateProperty("h_low", cs::VideoProperty::Kind::kInteger, 0, 180, 1, 25, config->targetHLow);
 	outputStream.CreateProperty("s_low", cs::VideoProperty::Kind::kInteger, 0, 255, 1, 128,config->targetSLow);
 	outputStream.CreateProperty("v_low", cs::VideoProperty::Kind::kInteger, 0, 255, 1, 128, config->targetVLow);
 
@@ -725,8 +725,8 @@ void CameraThread(CameraConfig* config) {
 	outputStream.CreateStringProperty("line_coeff", buf);
 	
 	// Adding them here so it is easier to copy/paste the settings
-	outputStream.CreateProperty("exposure_auto", cs::VideoProperty::Kind::kInteger, 0, 1, 1, 1, 1);
-	outputStream.CreateProperty("exposure_absolute", cs::VideoProperty::Kind::kInteger, 0, 1, 1, 0, 0);
+//	outputStream.CreateProperty("exposure_auto", cs::VideoProperty::Kind::kInteger, 0, 1, 1, 1, 1);
+//	outputStream.CreateProperty("exposure_absolute", cs::VideoProperty::Kind::kInteger, 0, 1, 1, 0, 0);
 
 	cs::AddListener(
 		[&](const cs::RawEvent& event) {
