@@ -84,7 +84,7 @@ struct CameraConfig {
 vector<CameraConfig> cameras;
 
 nt::NetworkTableInstance ntinst;
-std::shared_ptr<nt::NetworkTable> table;
+std::shared_ptr<nt::NetworkTable> target_table, line_table;
 
 struct Stripe {
 	Point2f	box[4];
@@ -93,14 +93,14 @@ struct Stripe {
 	double	angle;
 
 //	bool left() { return angle < 0.0; }
-	void draw(Mat &dst, int idx) {
+	void draw(Mat &dst, int idx, int w) {
 		Scalar color[] = { Scalar(0, 0, 255), Scalar(255, 0, 0), Scalar(255, 255, 255) };
 //		Scalar color = left?Scalar(0, 0, 255):Scalar(255, 0, 0);
 
-		line(dst, box[0], box[1], color[idx]);
-		line(dst, box[1], box[3], color[idx]);
-		line(dst, box[3], box[2], color[idx]);
-		line(dst, box[2], box[0], color[idx]);
+		line(dst, box[0], box[1], color[idx], w);
+		line(dst, box[1], box[3], color[idx], w);
+		line(dst, box[3], box[2], color[idx], w);
+		line(dst, box[2], box[0], color[idx], w);
 	}
 
 	double area() {
@@ -111,7 +111,7 @@ struct Stripe {
 struct Target {
 	Stripe* left;
 	Stripe* right;
-	Mat	h;
+//	Mat	h;
 	Mat	rvec, tvec;
 	double	tpos[3];
 	double	yaw, pitch, roll;
@@ -474,35 +474,64 @@ void processTargets(Mat &src, Mat &dst, const CameraConfig& c) {
 		}
 	}
 
+	// find the target closest to the center
+	Target *center = NULL;
+	int w2 = c.width / 2;
+	int bestdx = w2;
+	for(size_t i = 0; i < targets.size(); i++) {
+		Target *t = targets[i];
+		int dx = abs(t->left->box[0].x - w2);
+
+		if (dx < bestdx) {
+			center = t;
+			bestdx = dx;
+		}
+	}
+
 	for(size_t i = 0; i < targets.size(); i++) {
 		char buf[32];
 		Target *t;
 
 		t = targets[i];
-		t->left->draw(dst, 0);
-		t->right->draw(dst, 1);
+		t->left->draw(dst, 0, t==center?3:1);
+		t->right->draw(dst, 1, t==center?3:1);
 
+		if (t == center) {
+			target_table->PutNumber("X", t->tpos[0]);
+			target_table->PutNumber("Y", t->tpos[1]);
+			target_table->PutNumber("Z", t->tpos[2]);
+			target_table->PutNumber("Yaw", t->yaw);
+			target_table->PutNumber("Pitch", t->pitch);
+			target_table->PutNumber("Roll", t->roll);
+		}
+						
+/*
 		snprintf(buf, sizeof(buf), "%02d", i);
-		std::shared_ptr<nt::NetworkTable> ttbl = table->GetSubTable(buf);
+		std::shared_ptr<nt::NetworkTable> ttbl = target_table->GetSubTable(buf);
 		ttbl->PutNumber("X", t->tpos[0]);
 		ttbl->PutNumber("Y", t->tpos[1]);
 		ttbl->PutNumber("Z", t->tpos[2]);
 		ttbl->PutNumber("Yaw", t->yaw);
 		ttbl->PutNumber("Pitch", t->pitch);
 		ttbl->PutNumber("Roll", t->roll);
+*/
+/*
 
 		printf("Target %d\n", i);
 		printf("\tyaw %f pitch %f roll %f\n", t->yaw, t->pitch, t->roll);
 		printf("\tx %f y %f z %f\n", t->tpos[0], t->tpos[1], t->tpos[2]);
+*/
 	}
 
+/*
 	// (hopefully) clear all stale sub-tables
 	for(size_t i = targets.size(); i < 10; i++) {
 		char buf[32];
 
 		snprintf(buf, sizeof(buf), "%02d", i);
-		table->Delete(buf);
+		target_table->Delete(buf);
 	}
+*/
 
 	// Cleanup
 	for(size_t i = 0; i < targets.size(); i++)
@@ -525,8 +554,26 @@ void processLine(Mat &src, Mat &dst, const CameraConfig& c) {
 	findContours(mask, contours, hierarchy, RETR_TREE, CHAIN_APPROX_TC89_KCOS/*CHAIN_APPROX_SIMPLE*/);
 
 	// convert the contours into stripes and find the biggest one by area (hopefully the white line)
+	int bestidx = -1;
+	double bestarea = 0.0;
+	for(size_t i = 0; i < contours.size(); i++) {
+		double area = contourArea(contours[i]);
+		if (area > bestarea) {
+			bestidx = i;
+			bestarea = area;
+		}
+	}
+
+	if (bestidx < 0)
+		return;
+
+	best = processContour(contours[bestidx]);
+/*
 	best = NULL;
 	for(size_t i = 0; i < contours.size(); i++) {
+		if (contours[i].area() > 0)
+			continue;
+
 		Stripe *st = processContour(contours[i]);
 		if (st == NULL)
 			continue;
@@ -542,15 +589,16 @@ void processLine(Mat &src, Mat &dst, const CameraConfig& c) {
 	// if we didn't find any, just return
 	if (!best)
 		return;
+*/
 
 	// draw the ractangle on the image
-	best->draw(dst, true);
+	best->draw(dst, 0, 1);
 
 	// put the angle and displacement in the NetworkTable
-	table->PutNumber("Angle", best->angle);
+	line_table->PutNumber("Angle", best->angle);
 
 	double center = c.lineCoeff * (((best->box[0].x + best->box[1].x + best->box[2].x + best->box[3].x) / 4) / c.width - 0.5);
-	table->PutNumber("X", center);
+	line_table->PutNumber("X", center);
 
 	printf("angle %f x %f\n", best->angle, center);
 	delete best;
@@ -716,7 +764,7 @@ void CameraThread(CameraConfig* config) {
 	outputStream.CreateProperty("s_low", cs::VideoProperty::Kind::kInteger, 0, 255, 1, 128,config->targetSLow);
 	outputStream.CreateProperty("v_low", cs::VideoProperty::Kind::kInteger, 0, 255, 1, 128, config->targetVLow);
 
-	outputStream.CreateProperty("h_high", cs::VideoProperty::Kind::kInteger, 0, 360, 1, 35, config->targetHHigh);
+	outputStream.CreateProperty("h_high", cs::VideoProperty::Kind::kInteger, 0, 180, 1, 35, config->targetHHigh);
 	outputStream.CreateProperty("s_high", cs::VideoProperty::Kind::kInteger, 0, 255, 1, 128,config->targetSHigh);
 	outputStream.CreateProperty("v_high", cs::VideoProperty::Kind::kInteger, 0, 255, 1, 128, config->targetVHigh);
 
@@ -808,7 +856,8 @@ int main(int argc, char* argv[]) {
 		ntinst.StartClientTeam(team);
 	}
 
-	table = ntinst.GetTable("Target");
+	target_table = ntinst.GetTable("Target");
+	line_table = ntinst.GetTable("Line");
 
 	// start cameras
 	for(int i = 0; i < cameras.size(); i++) {
