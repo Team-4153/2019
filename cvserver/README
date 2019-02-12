@@ -47,15 +47,13 @@ used to track vision targets. An example of custom properties that
 enable the vision target tracking:
 
 [
-	{"name":"track_target","value":true},
-	{"name":"h_low","value":0},
-	{"name":"s_low","value":0},
-	{"name":"v_low","value":0},
-	{"name":"h_high","value":180},
-	{"name":"s_high","value":255},
-	{"name":"v_high","value":255}
-	{"name":"auto_exposure","value":1},
-	{"name":"exposure_time_absolute","value":1}
+                { "name": "track_line", "value": false },
+                { "name": "h_low", "value": 60 },
+                { "name": "s_low", "value": 200 },
+                { "name": "v_low", "value": 136 },
+                { "name": "h_high", "value": 95 },
+                { "name": "s_high", "value": 255 },
+                { "name": "v_high", "value": 255 }
 ]
 
 The tracking works best when the exposure time is low and the camera
