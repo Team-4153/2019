@@ -8,6 +8,11 @@ FRCDIR=/home/pi/frc/wpilib
 
 build: ${EXE}
 
+install:
+	sudo install ${EXE} /usr/local/frc/bin
+	sudo rm -rf /usr/local/frc/bin/multiCameraServer
+	sudo ln -sf /usr/local/frc/bin/${EXE} /usr/local/frc/bin/multiCameraServer
+
 clean:
 	rm -f ${EXE} *.o *~
 
