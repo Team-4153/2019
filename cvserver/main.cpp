@@ -28,6 +28,12 @@
 
 #include "cameraserver/CameraServer.h"
 
+// Scale factor. Should be 1 for the real robot
+#define SCALE 7
+
+// Set to 0 for not printing anything on the screen
+#define DEBUG 1
+
 /*
    JSON format:
    {
@@ -147,16 +153,16 @@ const double angle_high = 20.0;
 // Model of the target. All numbers are in centimeters
 vector<Point3f> Target::model = {
 	// left stripe
-	Point3f(-15.3967/7, 99.3775/7, 0),
-	Point3f(-10.16/7, 98.1442/7, 0),
-	Point3f(-18.8945/7, 85.8525/7, 0),
-	Point3f(-13.6578/7, 84.6192/7, 0),
+	Point3f(-15.3967/SCALE, 99.3775/SCALE, 0),
+	Point3f(-10.16/SCALE, 98.1442/SCALE, 0),
+	Point3f(-18.8945/SCALE, 85.8525/SCALE, 0),
+	Point3f(-13.6578/SCALE, 84.6192/SCALE, 0),
 
 	// right stripe
-	Point3f(15.3967/7, 99.3775/7, 0),
-	Point3f(10.16/7, 98.1442/7, 0),
-	Point3f(18.8945/7, 85.8525/7, 0),
-	Point3f(13.6578/7, 84.6192/7, 0),
+	Point3f(15.3967/SCALE, 99.3775/SCALE, 0),
+	Point3f(10.16/SCALE, 98.1442/SCALE, 0),
+	Point3f(18.8945/SCALE, 85.8525/SCALE, 0),
+	Point3f(13.6578/SCALE, 84.6192/SCALE, 0),
 };
 
 // Raspberry Pi Camera (640x480)
@@ -515,12 +521,12 @@ void processTargets(Mat &src, Mat &dst, const CameraConfig& c) {
 		ttbl->PutNumber("Pitch", t->pitch);
 		ttbl->PutNumber("Roll", t->roll);
 */
-/*
 
+#if DEBUG
 		printf("Target %d\n", i);
 		printf("\tyaw %f pitch %f roll %f\n", t->yaw, t->pitch, t->roll);
 		printf("\tx %f y %f z %f\n", t->tpos[0], t->tpos[1], t->tpos[2]);
-*/
+#endif
 	}
 
 /*
@@ -600,7 +606,9 @@ void processLine(Mat &src, Mat &dst, const CameraConfig& c) {
 	double center = c.lineCoeff * (((best->box[0].x + best->box[1].x + best->box[2].x + best->box[3].x) / 4) / c.width - 0.5);
 	line_table->PutNumber("X", center);
 
+#if DEBUG
 	printf("angle %f x %f\n", best->angle, center);
+#endif
 	delete best;
 }
 
@@ -829,8 +837,10 @@ void CameraThread(CameraConfig* config) {
 		if (config->lineTrack)
 			processLine(mat, mat, *config);
 
+#if DEBUG
 		if (prevtime != 0)
 			printf("%f fps\n", 1000000.0 / (tstamp - prevtime));
+#endif
 
 		prevtime = tstamp;
 		// Give the output stream a new image to display
