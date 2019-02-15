@@ -32,7 +32,7 @@
 #define SCALE 7
 
 // Set to 0 for not printing anything on the screen
-#define DEBUG 1
+#define DEBUG 0
 
 /*
    JSON format:
@@ -764,8 +764,14 @@ void CameraThread(CameraConfig* config) {
 	if (!config->targetTrack && !config->lineTrack)
 		return;
 
-	cs::CvSink cvSink = frc::CameraServer::GetInstance()->GetVideo();
-	cs::CvSource outputStream = frc::CameraServer::GetInstance()->PutVideo("Target", config->width, config->height);
+	string tgtname;
+	if (config->targetTrack)
+		tgtname = config->name + ":Target";
+	else
+		tgtname = config->name + ":Line";
+
+	cs::CvSink cvSink = frc::CameraServer::GetInstance()->GetVideo(camera);
+	cs::CvSource outputStream = frc::CameraServer::GetInstance()->PutVideo(tgtname, config->width, config->height);
 	outputStream.CreateProperty("track_target", cs::VideoProperty::Kind::kBoolean, 0, 1, 1, 0, config->targetTrack);
 	outputStream.CreateProperty("track_line", cs::VideoProperty::Kind::kBoolean, 0, 1, 1, 0, config->lineTrack);
 	outputStream.CreateProperty("h_low", cs::VideoProperty::Kind::kInteger, 0, 180, 1, 25, config->targetHLow);
