@@ -1,0 +1,67 @@
+{
+    "cameras": [
+        {
+            "fps": 30,
+            "height": 480,
+            "name": "HD3000",
+            "path": "/dev/video0",
+            "pixel format": "mjpeg",
+            "properties": [
+                {
+                    "name": "exposure_auto",
+                    "value": 1
+                },
+                {
+                    "name": "raw_exposure_absolute",
+                    "value": 5
+                },
+                {
+                    "name": "exposure_absolute",
+                    "value": 1
+                },
+                {
+                    "name": "track_target",
+                    "value": true
+                },
+                {
+                    "name": "track_line",
+                    "value": false
+                },
+                {
+                    "name": "h_low",
+                    "value": 60
+                },
+                {
+                    "name": "s_low",
+                    "value": 200
+                },
+                {
+                    "name": "v_low",
+                    "value": 136
+                },
+                {
+                    "name": "h_high",
+                    "value": 95
+                },
+                {
+                    "name": "s_high",
+                    "value": 255
+                },
+                {
+                    "name": "v_high",
+                    "value": 255
+                },
+                {
+                    "name": "line_coeff",
+                    "value": "1.000000"
+                }
+            ],
+            "stream": {
+                "properties": []
+            },
+            "width": 640
+        }
+    ],
+    "ntmode": "client",
+    "team": 294
+}
