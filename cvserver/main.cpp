@@ -29,7 +29,7 @@
 #include "cameraserver/CameraServer.h"
 
 // Scale factor. Should be 1 for the real robot
-#define SCALE 7
+#define SCALE 1
 
 // Set to 0 for not printing anything on the screen
 #define DEBUG 0
@@ -91,6 +91,8 @@ vector<CameraConfig> cameras;
 
 nt::NetworkTableInstance ntinst;
 std::shared_ptr<nt::NetworkTable> target_table, line_table;
+
+Mat erosionElement;
 
 struct Stripe {
 	Point2f	box[4];
@@ -369,7 +371,7 @@ bool checkTarget(Stripe* s1, Stripe* s2) {
 
 	// Check the angles
 //	printf("\tangles %f:%f %f\n", si->angle, sj->angle, si->angle - sj->angle);
-	if (s1->angle - s2->angle < 0)
+	if (s1->angle*s2->angle > 0)
 		return false;
 
 	// If the areas are significantly different, skip it
@@ -395,27 +397,38 @@ bool checkTarget(Stripe* s1, Stripe* s2) {
 	// If the x-distance is much further than the length, skip it
 	// This doesn't make much sense, because it looks that the stripes from different targets
 	// are actually closer. So I am commenting it out.
-	if ((s2->box[0].x - s1->box[0].x) / s1->length > 10)
+	if ((s2->box[0].x - s1->box[0].x) / s1->length > 5)
 		return false;
 
 
+	
 	return true;
 }
 
 void processTargets(Mat &src, Mat &dst, const CameraConfig& c) {
-	Mat mask, hsv;
+	Mat mask, hsv, gauss, emask, dmask;
 	vector<Vec4i> hierarchy;
 	vector<vector<Point> > contours;
 	int stripenum;
 	Stripe *stripes[64];
 
-	cvtColor(src, hsv, CV_BGR2HSV);
+/*
+	// Gauss filter for smoothing the imag
+	GaussianBlur(src, gauss, Size(11, 11), 1.5);
+*/
+
+	// Convert to HSV
+	cvtColor(src /*gauss*/, hsv, CV_BGR2HSV);
 
 	// Get only pixels that have the colors we expect the stripes to be
 	inRange(hsv, Scalar(c.targetHLow, c.targetSLow, c.targetVLow), Scalar(c.targetHHigh, c.targetSHigh, c.targetVHigh), mask);
 
+	// Remove small blobs
+//	erode(mask, emask, erosionElement, Point(-1, -1), 2);
+//	dilate(emask, dmask, erosionElement, Point(-1, -1), 2);
+
 	// Find contours
-	findContours(mask, contours, hierarchy, RETR_TREE, CHAIN_APPROX_TC89_KCOS/*CHAIN_APPROX_SIMPLE*/);
+	findContours(mask/*dmask*/, contours, hierarchy, RETR_TREE, CHAIN_APPROX_TC89_KCOS/*CHAIN_APPROX_SIMPLE*/);
 
 	// Identify stripes
 	stripenum = 0;
@@ -792,7 +805,9 @@ void CameraThread(CameraConfig* config) {
 
 	cs::AddListener(
 		[&](const cs::RawEvent& event) {
+#if DEBUG
 			cout << "Property updated '" << event.name << "' value: " << event.value << "\n";
+#endif
 			if (event.name == "h_low") {
 				config->targetHLow = event.value;
 			} else if (event.name == "s_low") {
@@ -826,6 +841,7 @@ void CameraThread(CameraConfig* config) {
 		}, cs::RawEvent::kSourcePropertyValueUpdated, true, &status);
 
 	uint64_t prevtime = 0;
+	int framecount = 0;
 	while (true) {
 		// Tell the CvSink to grab a frame from the camera and put it
 		// in the source mat.  If there is an error notify the output.
@@ -843,20 +859,26 @@ void CameraThread(CameraConfig* config) {
 		if (config->lineTrack)
 			processLine(mat, mat, *config);
 
+		if ((tstamp - prevtime) > 1000000) {
 #if DEBUG
-		if (prevtime != 0)
-			printf("%f fps\n", 1000000.0 / (tstamp - prevtime));
+			if (prevtime != 0)
+				printf("Rate: %f fps\n", framecount*1000000.0 / (tstamp - prevtime));
 #endif
+			framecount = 0;
+			prevtime = tstamp;
+		}
 
-		prevtime = tstamp;
 		// Give the output stream a new image to display
 		outputStream.PutFrame(mat);
+		framecount++;
 	}
 }
 
 int main(int argc, char* argv[]) {
 	if (argc >= 2)
 		configFile = argv[1];
+
+	erosionElement = getStructuringElement(MORPH_RECT, Size(3, 3), Point(1, 1));
 
 	// read configuration
 	if (!ReadConfig())
