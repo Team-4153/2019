@@ -507,6 +507,15 @@ void processTargets(Mat &src, Mat &dst, const CameraConfig& c) {
 		}
 	}
 
+	if (center) {
+		target_table->PutNumber("X", center->tpos[0]);
+		target_table->PutNumber("Y", center->tpos[1]);
+		target_table->PutNumber("Z", center->tpos[2]);
+		target_table->PutNumber("Yaw", center->yaw);
+		target_table->PutNumber("Pitch", center->pitch);
+		target_table->PutNumber("Roll", center->roll);
+	}
+
 	for(size_t i = 0; i < targets.size(); i++) {
 		char buf[32];
 		Target *t;
@@ -515,6 +524,7 @@ void processTargets(Mat &src, Mat &dst, const CameraConfig& c) {
 		t->left->draw(dst, 0, t==center?3:1);
 		t->right->draw(dst, 1, t==center?3:1);
 
+/*
 		if (t == center) {
 			target_table->PutNumber("X", t->tpos[0]);
 			target_table->PutNumber("Y", t->tpos[1]);
@@ -523,6 +533,7 @@ void processTargets(Mat &src, Mat &dst, const CameraConfig& c) {
 			target_table->PutNumber("Pitch", t->pitch);
 			target_table->PutNumber("Roll", t->roll);
 		}
+*/
 						
 /*
 		snprintf(buf, sizeof(buf), "%02d", i);
@@ -894,8 +905,8 @@ int main(int argc, char* argv[]) {
 		ntinst.StartClientTeam(team);
 	}
 
-	target_table = ntinst.GetTable("Target");
-	line_table = ntinst.GetTable("Line");
+	target_table = ntinst.GetTable("SmartDashboard/Target");
+	line_table = ntinst.GetTable("SmartDashboard/Line");
 
 	// start cameras
 	for(int i = 0; i < cameras.size(); i++) {
