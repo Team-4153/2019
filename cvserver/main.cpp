@@ -85,6 +85,7 @@ struct CameraConfig {
 	double		lineCoeff;	// used to calculate real distance
 
 	wpi::json	config;
+	CS_Source	outHandle;	// output stream
 };
 
 vector<CameraConfig> cameras;
@@ -507,6 +508,15 @@ void processTargets(Mat &src, Mat &dst, const CameraConfig& c) {
 		}
 	}
 
+	if (center) {
+		target_table->PutNumber("X", center->tpos[0]);
+		target_table->PutNumber("Y", center->tpos[1]);
+		target_table->PutNumber("Z", center->tpos[2]);
+		target_table->PutNumber("Yaw", center->yaw);
+		target_table->PutNumber("Pitch", center->pitch);
+		target_table->PutNumber("Roll", center->roll);
+	}
+
 	for(size_t i = 0; i < targets.size(); i++) {
 		char buf[32];
 		Target *t;
@@ -515,6 +525,7 @@ void processTargets(Mat &src, Mat &dst, const CameraConfig& c) {
 		t->left->draw(dst, 0, t==center?3:1);
 		t->right->draw(dst, 1, t==center?3:1);
 
+/*
 		if (t == center) {
 			target_table->PutNumber("X", t->tpos[0]);
 			target_table->PutNumber("Y", t->tpos[1]);
@@ -523,6 +534,7 @@ void processTargets(Mat &src, Mat &dst, const CameraConfig& c) {
 			target_table->PutNumber("Pitch", t->pitch);
 			target_table->PutNumber("Roll", t->roll);
 		}
+*/
 						
 /*
 		snprintf(buf, sizeof(buf), "%02d", i);
@@ -620,7 +632,7 @@ void processLine(Mat &src, Mat &dst, const CameraConfig& c) {
 	line_table->PutNumber("X", center);
 
 #if DEBUG
-	printf("angle %f x %f\n", best->angle, center);
+	printf("%s angle %f x %f coeff %f\n", c.name.c_str(), best->angle, center, c.lineCoeff);
 #endif
 	delete best;
 }
@@ -692,6 +704,7 @@ bool ReadCameraConfig(const wpi::json& config) {
 				c.targetVHigh = prop.at("value").get<int>();
 			} else if (name == "line_coeff") {
 				c.lineCoeff = prop.at("value").get<double>();
+				printf("Camera %s line_coeff %f\n", c.name.c_str(), c.lineCoeff);
 			}
 		}
 	} catch (const wpi::json::exception& e) {
@@ -785,6 +798,8 @@ void CameraThread(CameraConfig* config) {
 
 	cs::CvSink cvSink = frc::CameraServer::GetInstance()->GetVideo(camera);
 	cs::CvSource outputStream = frc::CameraServer::GetInstance()->PutVideo(tgtname, config->width, config->height);
+	config->outHandle = outputStream.GetHandle();
+
 	outputStream.CreateProperty("track_target", cs::VideoProperty::Kind::kBoolean, 0, 1, 1, 0, config->targetTrack);
 	outputStream.CreateProperty("track_line", cs::VideoProperty::Kind::kBoolean, 0, 1, 1, 0, config->lineTrack);
 	outputStream.CreateProperty("h_low", cs::VideoProperty::Kind::kInteger, 0, 180, 1, 25, config->targetHLow);
@@ -802,43 +817,6 @@ void CameraThread(CameraConfig* config) {
 	// Adding them here so it is easier to copy/paste the settings
 //	outputStream.CreateProperty("exposure_auto", cs::VideoProperty::Kind::kInteger, 0, 1, 1, 1, 1);
 //	outputStream.CreateProperty("exposure_absolute", cs::VideoProperty::Kind::kInteger, 0, 1, 1, 0, 0);
-
-	cs::AddListener(
-		[&](const cs::RawEvent& event) {
-#if DEBUG
-			cout << "Property updated '" << event.name << "' value: " << event.value << "\n";
-#endif
-			if (event.name == "h_low") {
-				config->targetHLow = event.value;
-			} else if (event.name == "s_low") {
-				config->targetSLow = event.value;
-			} else if (event.name == "v_low") {
-				config->targetVLow = event.value;
-			} else if (event.name == "h_high") {
-				config->targetHHigh = event.value;
-			} else if (event.name == "s_high") {
-				config->targetSHigh = event.value;
-			} else if (event.name == "v_high") {
-				config->targetVHigh = event.value;
-			} else if (event.name == "track_target") {
-				config->targetTrack = event.value;
-			} else if (event.name == "track_line") {
-				config->lineTrack = event.value;
-			} else if (event.name == "line_coeff") {
-				char *s;
-				double v;
-
-				v = strtod(event.valueStr.c_str(), &s);
-				if (*s == '\0') {
-					config->lineCoeff = v;
-				}
-			} else if (event.name == "exposure_auto") {
-				// ignore for now
-			} else if (event.name == "exposure_absolute") {
-				// ignore for now
-				// camera.SetExposureManual(event.value);
-			}
-		}, cs::RawEvent::kSourcePropertyValueUpdated, true, &status);
 
 	uint64_t prevtime = 0;
 	int framecount = 0;
@@ -875,6 +853,8 @@ void CameraThread(CameraConfig* config) {
 }
 
 int main(int argc, char* argv[]) {
+	CS_Status status;
+
 	if (argc >= 2)
 		configFile = argv[1];
 
@@ -894,8 +874,63 @@ int main(int argc, char* argv[]) {
 		ntinst.StartClientTeam(team);
 	}
 
-	target_table = ntinst.GetTable("Target");
-	line_table = ntinst.GetTable("Line");
+	target_table = ntinst.GetTable("SmartDashboard/Target");
+	line_table = ntinst.GetTable("SmartDashboard/Line");
+
+	cs::AddListener(
+		[&](const cs::RawEvent& event) {
+			CameraConfig *config;
+
+			// find which camera
+			config = NULL;
+			for(int i = 0; i < cameras.size(); i++) {
+				
+				auto c = &cameras[i];
+				if (c->outHandle == event.sourceHandle) {
+					config = c;
+					break;
+				}
+			}
+
+
+			if (config == NULL) {
+				printf("Property for unknown camera updated: %s %d\n", event.name.c_str(), event.value);
+				return;
+			}
+#if DEBUG
+			cout << "Property updated '" << event.name << "' value: " << event.value << "\n";
+#endif
+			if (event.name == "h_low") {
+				config->targetHLow = event.value;
+			} else if (event.name == "s_low") {
+				config->targetSLow = event.value;
+			} else if (event.name == "v_low") {
+				config->targetVLow = event.value;
+			} else if (event.name == "h_high") {
+				config->targetHHigh = event.value;
+			} else if (event.name == "s_high") {
+				config->targetSHigh = event.value;
+			} else if (event.name == "v_high") {
+				config->targetVHigh = event.value;
+			} else if (event.name == "track_target") {
+				config->targetTrack = event.value;
+			} else if (event.name == "track_line") {
+				config->lineTrack = event.value;
+			} else if (event.name == "line_coeff") {
+				char *s;
+				double v;
+
+				v = strtod(event.valueStr.c_str(), &s);
+				if (*s == '\0') {
+					config->lineCoeff = v;
+				}
+			} else if (event.name == "exposure_auto") {
+				// ignore for now
+			} else if (event.name == "exposure_absolute") {
+				// ignore for now
+				// camera.SetExposureManual(event.value);
+			}
+		}, cs::RawEvent::kSourcePropertyValueUpdated, true, &status);
 
 	// start cameras
 	for(int i = 0; i < cameras.size(); i++) {
