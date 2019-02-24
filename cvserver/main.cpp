@@ -570,16 +570,25 @@ void processTargets(Mat &src, Mat &dst, const CameraConfig& c) {
 }
 
 void processLine(Mat &src, Mat &dst, const CameraConfig& c) {
-	Mat gray, mask, rsz;
+	Mat hsv, mask, rsz;
 	vector<Vec4i> hierarchy;
 	vector<vector<Point> > contours;
 	Stripe *best;
 
+
+	// Convert to HSV
+	cvtColor(src, hsv, CV_BGR2HSV);
+
+	// Get only pixels that have the colors we expect the stripes to be
+	inRange(hsv, Scalar(c.targetHLow, c.targetSLow, c.targetVLow), Scalar(c.targetHHigh, c.targetSHigh, c.targetVHigh), mask);
+
+#if 0
 	// convert the image to grayscale
 	cvtColor(src, gray, CV_BGR2GRAY);
 
 	// make the image black/white with a dynamic Otsu thresholding
 	threshold(gray, mask, 0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
+#endif
 
 	// find all contours in the image (hopefully only one)
 	findContours(mask, contours, hierarchy, RETR_TREE, CHAIN_APPROX_TC89_KCOS/*CHAIN_APPROX_SIMPLE*/);
@@ -703,8 +712,18 @@ bool ReadCameraConfig(const wpi::json& config) {
 			} else if (name == "v_high") {
 				c.targetVHigh = prop.at("value").get<int>();
 			} else if (name == "line_coeff") {
-				c.lineCoeff = prop.at("value").get<double>();
+				char *eptr;
+				auto *lc = prop.at("value").get<std::string>().c_str();
+				double val = strtod(lc, &eptr);
+
+				if (*eptr != '\0') {
+					ParseError() << "value for line_coeff has to be a number\n";
+				} else {
+					c.lineCoeff = val;
+				}
+#if DEBUG
 				printf("Camera %s line_coeff %f\n", c.name.c_str(), c.lineCoeff);
+#endif
 			}
 		}
 	} catch (const wpi::json::exception& e) {
@@ -814,10 +833,6 @@ void CameraThread(CameraConfig* config) {
 	snprintf(buf, sizeof(buf), "%f", config->lineCoeff);
 	outputStream.CreateStringProperty("line_coeff", buf);
 	
-	// Adding them here so it is easier to copy/paste the settings
-//	outputStream.CreateProperty("exposure_auto", cs::VideoProperty::Kind::kInteger, 0, 1, 1, 1, 1);
-//	outputStream.CreateProperty("exposure_absolute", cs::VideoProperty::Kind::kInteger, 0, 1, 1, 0, 0);
-
 	uint64_t prevtime = 0;
 	int framecount = 0;
 	while (true) {
@@ -898,7 +913,7 @@ int main(int argc, char* argv[]) {
 				return;
 			}
 #if DEBUG
-			cout << "Property updated '" << event.name << "' value: " << event.value << "\n";
+			printf("Property for %s updated %s: %d/%s\n", config->name.c_str(), event.name.c_str(), event.value, event.valueStr.c_str());
 #endif
 			if (event.name == "h_low") {
 				config->targetHLow = event.value;
@@ -924,11 +939,6 @@ int main(int argc, char* argv[]) {
 				if (*s == '\0') {
 					config->lineCoeff = v;
 				}
-			} else if (event.name == "exposure_auto") {
-				// ignore for now
-			} else if (event.name == "exposure_absolute") {
-				// ignore for now
-				// camera.SetExposureManual(event.value);
 			}
 		}, cs::RawEvent::kSourcePropertyValueUpdated, true, &status);
 
