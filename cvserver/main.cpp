@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 #include <iostream>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgproc.hpp>
@@ -33,6 +35,8 @@
 
 // Set to 0 for not printing anything on the screen
 #define DEBUG 0
+
+#define SAVEIMG 1
 
 /*
    JSON format:
@@ -95,6 +99,9 @@ std::shared_ptr<nt::NetworkTable> target_table, line_table;
 
 Mat erosionElement;
 
+int savePeriod = 500000;	// in us
+char imagePath[256];
+
 struct Stripe {
 	Point2f	box[4];
 	double	length;
@@ -110,6 +117,10 @@ struct Stripe {
 		line(dst, box[1], box[3], color[idx], w);
 		line(dst, box[3], box[2], color[idx], w);
 		line(dst, box[2], box[0], color[idx], w);
+	}
+
+	double centerX() {
+		return (box[0].x + box[1].x + box[2].x + box[3].x) / 4.0;
 	}
 
 	double area() {
@@ -141,6 +152,8 @@ struct Target {
 
 	double topWidth() { return right->box[1].x - left->box[0].x; }
 	double bottomWidth() { return right->box[3].x - left->box[2].x; }
+	double centerX() { return (left->centerX() + right->centerX()) / 2.0; }
+	double width() { return right->centerX() - left->centerX(); }
 	void calcPnP();
 };
 
@@ -150,8 +163,8 @@ const int height = 480; // 922 // 720 // 480
 // stripe data
 const double stripe_ratio = 2.78;
 const double stripe_err = 2.0;
-const double angle_low = -20.0;
-const double angle_high = 20.0;
+const double angle_low = -40.0;
+const double angle_high = 40.0;
 
 // Model of the target. All numbers are in centimeters
 vector<Point3f> Target::model = {
@@ -371,8 +384,8 @@ bool checkTarget(Stripe* s1, Stripe* s2) {
 	a2 = s2->area();
 
 	// Check the angles
-//	printf("\tangles %f:%f %f\n", si->angle, sj->angle, si->angle - sj->angle);
-	if (s1->angle*s2->angle > 0)
+//	printf("\tangles %f:%f %f\n", s1->angle, s2->angle, s1->angle - s2->angle);
+	if (s1->angle < s2->angle)
 		return false;
 
 	// If the areas are significantly different, skip it
@@ -458,9 +471,9 @@ void processTargets(Mat &src, Mat &dst, const CameraConfig& c) {
 	}
 
 //	printf("stripenum %d\n", stripenum);
-	if (stripenum < 2) {
-		return;
-	}
+//	if (stripenum < 2) {
+//		return;
+//	}
 
 	// sort horizontally
 	qsort(stripes, stripenum, sizeof(Stripe *), stripecmp);
@@ -515,6 +528,16 @@ void processTargets(Mat &src, Mat &dst, const CameraConfig& c) {
 		target_table->PutNumber("Yaw", center->yaw);
 		target_table->PutNumber("Pitch", center->pitch);
 		target_table->PutNumber("Roll", center->roll);
+
+		double cx = ((center->centerX() * 2) / c.width) - 1.0;
+		double w = center->width() / c.width;
+
+		target_table->PutNumber("Center", cx);
+		target_table->PutNumber("Width", w);
+//		printf("cx: %f w %f\n", cx, w);
+	} else {
+		target_table->PutNumber("Center", 0.0);
+		target_table->PutNumber("Width", 0.0);
 	}
 
 	for(size_t i = 0; i < targets.size(); i++) {
@@ -525,17 +548,6 @@ void processTargets(Mat &src, Mat &dst, const CameraConfig& c) {
 		t->left->draw(dst, 0, t==center?3:1);
 		t->right->draw(dst, 1, t==center?3:1);
 
-/*
-		if (t == center) {
-			target_table->PutNumber("X", t->tpos[0]);
-			target_table->PutNumber("Y", t->tpos[1]);
-			target_table->PutNumber("Z", t->tpos[2]);
-			target_table->PutNumber("Yaw", t->yaw);
-			target_table->PutNumber("Pitch", t->pitch);
-			target_table->PutNumber("Roll", t->roll);
-		}
-*/
-						
 /*
 		snprintf(buf, sizeof(buf), "%02d", i);
 		std::shared_ptr<nt::NetworkTable> ttbl = target_table->GetSubTable(buf);
@@ -637,11 +649,13 @@ void processLine(Mat &src, Mat &dst, const CameraConfig& c) {
 	// put the angle and displacement in the NetworkTable
 	line_table->PutNumber("Angle", best->angle);
 
-	double center = c.lineCoeff * (((best->box[0].x + best->box[1].x + best->box[2].x + best->box[3].x) / 4) / c.width - 0.5);
-	line_table->PutNumber("X", center);
+	double centerX = c.lineCoeff * (((best->box[0].x + best->box[1].x + best->box[2].x + best->box[3].x) / 4) / c.width - 0.5);
+	double centerY = c.lineCoeff * (((best->box[0].y + best->box[1].y + best->box[2].x + best->box[3].y) / 4) / c.height- 0.5);
+	line_table->PutNumber("X", centerX);
+	line_table->PutNumber("Y", centerY);
 
 #if DEBUG
-	printf("%s angle %f x %f coeff %f\n", c.name.c_str(), best->angle, center, c.lineCoeff);
+	printf("%s angle %f x %f coeff %f\n", c.name.c_str(), best->angle, centerX, c.lineCoeff);
 #endif
 	delete best;
 }
@@ -797,6 +811,36 @@ bool ReadConfig() {
 	return true;
 }
 
+int initImageDirectory(const char *basePath) {
+	for(int i = 0; i < 1000; i++) {
+		snprintf(imagePath, sizeof(imagePath), "%s/%03d", basePath, i);
+		if (mkdir(imagePath, 0777) == 0) {
+			return 0;
+		}
+
+		if (errno != EEXIST) {
+			imagePath[0] = '\0';
+			return -1;
+		}
+	}
+
+	imagePath[0] = '\0';
+	return -1;
+}
+
+bool saveImage(const char *cameraName, uint64_t timestamp, Mat& img) {
+	char fname[256];
+
+	if (imagePath[0] == '\0')
+		return true;
+
+	snprintf(fname, sizeof(fname), "%s/%s-%010lld.jpg", imagePath, cameraName, timestamp);
+//	printf("saveImage %s\n", fname);
+	bool ret = imwrite(fname, img);
+	sync();
+	return ret;
+}
+
 void CameraThread(CameraConfig* config) {
 	CS_Status status = 0;
 	char buf[20];
@@ -806,8 +850,8 @@ void CameraThread(CameraConfig* config) {
 	auto camera = frc::CameraServer::GetInstance()->StartAutomaticCapture(config->name, config->path);
 	camera.SetConfigJson(config->config);
 
-	if (!config->targetTrack && !config->lineTrack)
-		return;
+//	if (!config->targetTrack && !config->lineTrack)
+//		return;
 
 	string tgtname;
 	if (config->targetTrack)
@@ -834,7 +878,10 @@ void CameraThread(CameraConfig* config) {
 	outputStream.CreateStringProperty("line_coeff", buf);
 	
 	uint64_t prevtime = 0;
+	uint64_t savebase, prevsave = 0;
 	int framecount = 0;
+	const char *cname = config->name.c_str();
+	const char *tcname = tgtname.c_str();
 	while (true) {
 		// Tell the CvSink to grab a frame from the camera and put it
 		// in the source mat.  If there is an error notify the output.
@@ -846,17 +893,36 @@ void CameraThread(CameraConfig* config) {
 			continue;
 		}
 
-		if (config->targetTrack)
-			processTargets(mat, mat, *config);
+		bool bsave = false;
 
-		if (config->lineTrack)
+#if SAVEIMG
+		if (prevsave == 0)
+			savebase = tstamp;
+
+		bsave = (tstamp - prevsave) > savePeriod;
+		if (bsave) {
+			saveImage(cname, tstamp - savebase, mat);
+			prevsave = tstamp;
+		}
+#endif
+
+		if (config->targetTrack) {
+			processTargets(mat, mat, *config);
+			if (bsave)
+				saveImage(tcname, tstamp - savebase, mat);
+		}
+
+		if (config->lineTrack) {
 			processLine(mat, mat, *config);
+			if (bsave)
+				saveImage(tcname, tstamp - savebase, mat);
+		}
 
 		if ((tstamp - prevtime) > 1000000) {
-#if DEBUG
+//#if DEBUG
 			if (prevtime != 0)
-				printf("Rate: %f fps\n", framecount*1000000.0 / (tstamp - prevtime));
-#endif
+				fprintf(stderr, "Rate: %f fps\n", framecount*1000000.0 / (tstamp - prevtime));
+//#endif
 			framecount = 0;
 			prevtime = tstamp;
 		}
@@ -949,6 +1015,12 @@ int main(int argc, char* argv[]) {
 		thread cameraThread(CameraThread, camera);
 		cameraThread.detach();
 	}
+
+#if SAVEIMG
+	if (initImageDirectory("/mnt/rw") != 0) {
+		fprintf(stderr, "Can't initialize image saving\n");
+	}
+#endif
 
 	// loop forever
 	for (;;)
