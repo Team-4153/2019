@@ -1,8 +1,14 @@
 EXE=cvserver
-DESTDIR?=/home/pi/
+DESTDIR?=$(HOME)
 
-OPENCVDIR?=/home/pi/opencv
-FRCDIR=/home/pi/frc/wpilib
+OPENCVDIR?=$(HOME)/opencv
+FRCDIR=$(HOME)/frc/wpilib
+PFDIR=$(HOME)/work/Pathfinder
+
+FRCINC=$(FRCDIR)/include
+PFINC=$(PFDIR)/Pathfinder/src/include
+
+COMMONOBJS=csrv.o
 
 .PHONY: clean build install
 
@@ -16,8 +22,8 @@ install:
 clean:
 	rm -f ${EXE} *.o *~
 
-${EXE}: main.o
-	${CXX} -g -o $@ $< -L$(OPENCVDIR)/lib -lopencv_calib3d -lopencv_flann -lopencv_imgproc -lopencv_core -lopencv_features2d -lopencv_imgcodecs -L$(FRCDIR)/lib -lcameraserver -lcscore -lntcore -lwpiutil -pthread
+cvserver: cvserver.o $(COMMONOBJS)
+	${CXX} -g -o $@ $^ -L$(OPENCVDIR)/lib -lopencv_calib3d -lopencv_flann -lopencv_imgproc -lopencv_core -lopencv_features2d -lopencv_imgcodecs -L$(FRCDIR)/lib -lcameraserver -lcscore -lntcore -lwpiutil -pthread
 
 .cpp.o:
-	${CXX} -g -c -o $@ -I$(FRCDIR)/include -I$(FRCDIR)/include/wpiutil -I$(FRCDIR)/include/ntcore -I$(FRCDIR)/include/cscore -I$(FRCDIR)/include/cameraserver -I$(OPENCVDIR)/include/opencv4 $<
+	${CXX} -g -c -o $@ -I$(FRCINC) -I$(FRCINC)/wpiutil -I$(FRCINC)/ntcore -I$(FRCINC)/cscore -I$(FRCINC)/cameraserver -I$(OPENCVDIR)/include/opencv4 -I$(PFINC) -I/usr/include//eigen3 $<
