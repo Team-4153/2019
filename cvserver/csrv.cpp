@@ -32,7 +32,7 @@
 #include "csrv.h"
 
 // Scale factor. Should be 1 for the real robot
-#define SCALE 7
+#define SCALE 1
 
 // Set to 0 for not printing anything on the screen
 #define DEBUG 0
