@@ -798,7 +798,7 @@ bool saveImage(const char *cameraName, uint64_t timestamp, Mat& img) {
 	if (imagePath[0] == '\0')
 		return true;
 
-	snprintf(fname, sizeof(fname), "%s/%s-%010lld.jpg", imagePath, cameraName, timestamp);
+	snprintf(fname, sizeof(fname), "%s/%s-%011lld.jpg", imagePath, cameraName, timestamp);
 	bool ret = imwrite(fname, img);
 	sync();
 	return ret;
