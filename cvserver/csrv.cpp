@@ -112,6 +112,11 @@ void Stripe::draw(Mat &dst, int idx, int w) {
 	line(dst, box[1], box[3], color[idx], w);
 	line(dst, box[3], box[2], color[idx], w);
 	line(dst, box[2], box[0], color[idx], w);
+
+//	circle(dst, box[0], 5, Scalar(255, 0, 0));
+//	circle(dst, box[1], 5, Scalar(0, 0, 255));
+//	circle(dst, box[2], 5, Scalar(255, 0, 0), 3);
+//	circle(dst, box[3], 5, Scalar(0, 0, 255), 3);
 }
 
 double Stripe::centerX() {
@@ -126,16 +131,16 @@ double Stripe::area() {
 // Model of the target. All numbers are in centimeters
 vector<Point3f> Target::model = {
 	// left stripe
-	Point3f(-15.3967/SCALE, 99.3775/SCALE, 0),
-	Point3f(-10.16/SCALE, 98.1442/SCALE, 0),
-	Point3f(-18.8945/SCALE, 85.8525/SCALE, 0),
-	Point3f(-13.6578/SCALE, 84.6192/SCALE, 0),
+	Point3f(-10.16/SCALE, 98.1056/SCALE, 0),
+	Point3f(-15.4071/SCALE, 99.3775/SCALE, 0),
+	Point3f(-13.6578/SCALE, 84.5806/SCALE, 0),
+	Point3f(-18.9049/SCALE, 85.8525/SCALE, 0),
 
 	// right stripe
-	Point3f(15.3967/SCALE, 99.3775/SCALE, 0),
-	Point3f(10.16/SCALE, 98.1442/SCALE, 0),
-	Point3f(18.8945/SCALE, 85.8525/SCALE, 0),
-	Point3f(13.6578/SCALE, 84.6192/SCALE, 0),
+	Point3f(15.4071/SCALE, 99.3775/SCALE, 0),
+	Point3f(10.16/SCALE, 98.1056/SCALE, 0),
+	Point3f(18.9049/SCALE, 85.8525/SCALE, 0),
+	Point3f(13.6578/SCALE, 84.5806/SCALE, 0),
 };
 
 // Raspberry Pi Camera (640x480)
@@ -269,7 +274,7 @@ bool checkStripe(Stripe *s) {
 	return true;
 }
 
-Stripe *processContour(OutputArrayOfArrays contour) {
+Stripe *processContour(OutputArrayOfArrays contour, Mat &dst) {
 	Stripe *s;
 	Point2f box[4];
 
@@ -299,7 +304,7 @@ Stripe *processContour(OutputArrayOfArrays contour) {
 
 /* It looks that this is worse than the minAreaRect, at least at the moment...
 
-Stripe *processContour(OutputArrayOfArrays contour) {
+Stripe *processContour(OutputArrayOfArrays contour, Mat &dst) {
 	Stripe *s = NULL;
 	double p;
 	Point2f box[4];
@@ -308,12 +313,27 @@ Stripe *processContour(OutputArrayOfArrays contour) {
 	p = arcLength(contour, true);
 
 	// we don't care about contours that are too small
-	if (p < 40)
-		return NULL;
+//	if (p < 40)
+//		return NULL;
 
-	approxPolyDP(contour, approx, p * 0.04, true);
-	if (approx.size() != 4)
+//	convexHull(contour, 
+	approxPolyDP(contour, approx, p * 0.03, true);
+	if (approx.size() != 4) {
+		if (approx.size() > 4) {
+			Scalar clr(255, 255, 0);
+
+			for(int i = 0; i < approx.size(); i++) {
+				int j = i + 1;
+				if (j >= approx.size())
+					j = 0;
+
+				line(dst, approx[i], approx[j], clr);
+			}
+		}
+
+//		printf("approx.size %d\n", approx.size());
 		return NULL;
+	}
 
 	s = new(Stripe);
 	for(int i = 0; i < approx.size(); i++) {
@@ -353,8 +373,7 @@ Stripe *processContour(OutputArrayOfArrays contour) {
 	s->angle = (a1 + a2) / 2.0;
 
 	return s;
-}
-*/
+}*/
 
 int stripecmp(const void *p1, const void *p2) {
 	int ret;
@@ -442,7 +461,7 @@ void processTargets(Mat &src, Mat &dst, const CameraImpl& c, uint64_t tstamp) {
 		if (hierarchy[i][3] >= 0)
 			continue;
 
-		Stripe *st = processContour(contours[i]);
+		Stripe *st = processContour(contours[i], dst);
 		if (st == NULL) {
 //			printf("\tbad\n");
 			continue;
@@ -450,7 +469,7 @@ void processTargets(Mat &src, Mat &dst, const CameraImpl& c, uint64_t tstamp) {
 
 		// check if the stripe follows some common sense restrictions
 		if (!checkStripe(st)) {
-//			st->draw(dst, 2);
+//			st->draw(dst, 2, 1);
 			delete(st);
 			continue;
 		}
@@ -515,12 +534,15 @@ void processTargets(Mat &src, Mat &dst, const CameraImpl& c, uint64_t tstamp) {
 		double cx = ((center->centerX() * 2) / c.width) - 1.0;
 		double w = center->width() / c.width;
 
-		c.ntbl->PutNumber("X", center->tpos[0]);
-		c.ntbl->PutNumber("Y", center->tpos[1]);
-		c.ntbl->PutNumber("Z", center->tpos[2]);
+		double yawrad = (center->yaw*M_PI)/180.0;
+		double z = center->tpos[2] * cos(yawrad);
+		double x = center->tpos[2] * sin(yawrad) - center->tpos[0];
+
+		c.ntbl->PutNumber("X", x);
+		c.ntbl->PutNumber("Z", z);
 		c.ntbl->PutNumber("Yaw", center->yaw);
-		c.ntbl->PutNumber("Pitch", center->pitch);
-		c.ntbl->PutNumber("Roll", center->roll);
+//		c.ntbl->PutNumber("Pitch", center->pitch);
+//		c.ntbl->PutNumber("Roll", center->roll);
 
 		c.ntbl->PutNumber("Center", cx);
 		c.ntbl->PutNumber("Width", w);
@@ -605,7 +627,7 @@ void processLine(Mat &src, Mat &dst, const CameraImpl& c) {
 	if (bestidx < 0)
 		return;
 
-	best = processContour(contours[bestidx]);
+	best = processContour(contours[bestidx], dst);
 
 	// draw the ractangle on the image
 	best->draw(dst, 0, 1);
