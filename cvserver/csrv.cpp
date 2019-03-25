@@ -11,6 +11,8 @@
 #include <iostream>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <mutex>
+#include <condition_variable>
 
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgproc.hpp>
@@ -36,8 +38,6 @@
 
 // Set to 0 for not printing anything on the screen
 #define DEBUG 0
-
-#define SAVEIMG 0
 
 /*
    JSON format:
@@ -80,13 +80,19 @@ struct CameraImpl : Camera {
 	// callbacks for when new frame and/or targets are read
 	void (*frameCallback)(const Camera& c, uint64_t timestamp, Mat frame);
 	void (*targetsCallback)(const Camera& c, uint64_t timestamp, Target *center, vector<Target *>& targets);
+
+	// for saving the image in a separate thread
+	std::mutex imgmtx;
+	std::condition_variable imgcond;
+	Mat* img;
+	char imgname[256];
 };
 
 static const char* configFile = "/boot/frc.json";
 unsigned int team;
 bool server = false;
 
-vector<CameraImpl> cameras;
+vector<CameraImpl*> cameras;
 nt::NetworkTableInstance ntinst;
 
 bool saveImages;		// true if any of the cameras is going to save images
@@ -624,7 +630,8 @@ wpi::raw_ostream& ParseError() {
 }
 
 bool readCameraConfig(const wpi::json& config) {
-	CameraImpl c;
+	CameraImpl *cp = new CameraImpl();
+	CameraImpl& c = *cp;
 
 	c.config = config;
 	c.width = 640;
@@ -709,7 +716,7 @@ bool readCameraConfig(const wpi::json& config) {
 		// ignore
 	}
 
-	cameras.emplace_back(move(c));
+	cameras.emplace_back(cp);
 	return true;
 }
 
@@ -792,22 +799,24 @@ int initImageDirectory(const char *basePath) {
 	return -1;
 }
 
-bool saveImage(const char *cameraName, uint64_t timestamp, Mat& img) {
+bool saveImage(CameraImpl *c, const char *cameraName, uint64_t timestamp, Mat& img) {
 	char fname[256];
 
 	if (imagePath[0] == '\0')
 		return true;
 
-	snprintf(fname, sizeof(fname), "%s/%s-%011lld.jpg", imagePath, cameraName, timestamp);
-	bool ret = imwrite(fname, img);
-	sync();
-	return ret;
+	std::unique_lock<std::mutex> lck (c->imgmtx);
+	snprintf(c->imgname, sizeof(c->imgname), "%s/%s-%011lld.jpg", imagePath, cameraName, timestamp);
+	c->img = &img;
+	c->imgcond.notify_all();
+
+	return true;
 }
 
 void cameraThread(CameraImpl *c) {
 	CS_Status status = 0;
 	char buf[20];
-	cv::Mat frame;
+	cv::Mat frames[2];
 	string tgtname;
 	cs::CvSource outputStream;
 
@@ -849,7 +858,11 @@ void cameraThread(CameraImpl *c) {
 	int framecount = 0;
 	const char *cname = c->name.c_str();
 	const char *tcname = tgtname.c_str();
+	int fnum = 0;
 	while (true) {
+		Mat& frame = frames[fnum];
+		fnum = (fnum+1) % 2;
+
 		// Tell the CvSink to grab a frame from the camera and put it
 		// in the source mat.  If there is an error notify the output.
 		uint64_t tstamp = cvSink.GrabFrame(frame);
@@ -871,7 +884,7 @@ void cameraThread(CameraImpl *c) {
 
 			bool bsave = ((tstamp - prevsave)/1000.0) > c->savePeriod;
 			if (bsave) {
-				saveImage(cname, tstamp - savebase, frame);
+				saveImage(c, cname, tstamp - savebase, frame);
 				prevsave = tstamp;
 			}
 		}
@@ -900,6 +913,32 @@ void cameraThread(CameraImpl *c) {
 	}
 }
 
+void imgThread(CameraImpl *c) {
+	char imgname[256];
+	Mat *img;
+
+	std::unique_lock<std::mutex> lck (c->imgmtx);
+
+	while (1) {
+		if (c->img == NULL) {
+			// no image, wait for notification
+			c->imgcond.wait(lck);
+			continue;
+		}
+
+		strncpy(imgname, c->imgname, sizeof(imgname));
+		img = c->img;
+		c->img = NULL;
+		lck.unlock();
+		c->imgcond.notify_all();
+
+		imwrite(imgname, *img);
+		sync();
+		lck.lock();
+	}
+}
+
+
 int csrvInit(void (*frameCallback)(const Camera& c, uint64_t timestamp, cv::Mat frame),
 		void (*targetsCallback)(const Camera& c, uint64_t timestamp, Target *center, std::vector<Target *>& targets)) {
 
@@ -927,7 +966,7 @@ int csrvInit(void (*frameCallback)(const Camera& c, uint64_t timestamp, cv::Mat 
 			cam = NULL;
 			for(int i = 0; i < cameras.size(); i++) {
 				
-				auto c = &cameras[i];
+				auto c = cameras[i];
 				if (c->outHandle == event.sourceHandle) {
 					cam = c;
 					break;
@@ -974,13 +1013,16 @@ int csrvInit(void (*frameCallback)(const Camera& c, uint64_t timestamp, cv::Mat 
 
 	// start cameras
 	for(int i = 0; i < cameras.size(); i++) {
-		auto camera = &cameras[i];
+		auto camera = cameras[i];
 
 		camera->frameCallback = frameCallback;
 		camera->targetsCallback = targetsCallback;
 
 		thread cthread(cameraThread, camera);
 		cthread.detach();
+
+		thread ithread(imgThread, camera);
+		ithread.detach();
 	}
 
 	return 0;
